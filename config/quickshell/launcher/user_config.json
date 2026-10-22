@@ -1,0 +1,19 @@
+{
+    "groups": [
+        "Internet",
+        "Jogos",
+        "Desenvolvimento",
+        "M\u00eddia",
+        "Sistema",
+        "Escrit\u00f3rio",
+        "Outros"
+    ],
+    "app_data": {
+        "Ark": {
+            "group": "Outros"
+        },
+        "Zen Browser": {
+            "favorite": true
+        }
+    }
+}

@@ -1,0 +1,17 @@
+# ~/.config/wofi/config
+show=drun
+width=480
+height=360
+always_parse_args=true
+show_all=false
+print_command=true
+layer=top
+insensitive=true
+prompt=Buscar...
+allow_images=true
+image_size=24
+display_generic=false
+location=center
+halign=fill
+valign=center
+filter_rate=100

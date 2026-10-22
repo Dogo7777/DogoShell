@@ -1,0 +1,31 @@
+{
+  "wallpaper_path": "~/Pictures/Wallpapers/",
+  "cache_path": "~/.cache/quickshell/thumbs/",
+  "active_layout": "layouts/shell-classic.qml",
+  "wallpaper_tool": "awww",
+  "custom_command": "",
+  "post_apply": [
+    "matugen image \"$WALLPAPER_STILL\" -m dark -t scheme-tonal-spot",
+    "killall -SIGUSR2 waybar",
+    "hyprctl eval 'hl.config({ general = { col = { active_border = { colors = { \"0xff'$(matugen image \"$WALLPAPER_STILL\" -json | jq -r '.colors.dark.primary')'\" } } } } })'"
+  ],
+  "notify_on_apply": true,
+  "number_of_pictures": 4,
+  "border_color": "#C27B63",
+  "cache_batch_size": 20,
+  "stable_copy_path": "",
+  "video_extensions": [
+    "mp4",
+    "webm",
+    "mov",
+    "avi",
+    "mkv",
+    "gif",
+    "m4v",
+    "flv",
+    "wmv",
+    "mpeg",
+    "3gp"
+  ],
+  "video_thumbnail_interval": 5
+}

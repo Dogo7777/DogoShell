@@ -1,0 +1,10 @@
+{
+  "scale": 1.0,
+  "bar_mode": "island",
+  "bar_position": "top",
+  "bar_full_width": false,
+  "bar_floating": true,
+  "bar_margin": 6,
+  "bar_opacity": 0.55,
+  "show_clock_date": false
+}

@@ -1,0 +1,51 @@
+/* gerado por wallcolors.py (GTK3: Thunar etc.) */
+@define-color wall_accent #579fd9;
+@define-color wall_accent_fg #ffffff;
+@define-color theme_selected_bg_color #579fd9;
+@define-color theme_selected_fg_color #ffffff;
+
+window, window.background, window.background:backdrop, .background { background-color: rgba(8, 8, 10, 0.72); color: #f2f2f2; }
+window.csd, window.background.csd { border-radius: 16px; border: 1px solid alpha(@wall_accent, 0.55); }
+
+menubar, menubar:backdrop, .menubar, .menubar:backdrop, menubar > menuitem, menubar > menuitem:backdrop, decoration, decoration:backdrop, headerbar, headerbar:backdrop, .titlebar, .titlebar:backdrop, toolbar, toolbar:backdrop,
+.primary-toolbar, .primary-toolbar:backdrop, statusbar, statusbar:backdrop, actionbar, actionbar:backdrop {
+    background: transparent; background-image: none; border: none; box-shadow: none; color: #f2f2f2; }
+
+.sidebar, .sidebar:backdrop, .sidebar .view, .sidebar treeview, .sidebar treeview.view, .sidebar scrolledwindow,
+.view, .view:backdrop, iconview, iconview:backdrop, treeview.view, treeview.view:backdrop, scrolledwindow, scrolledwindow:backdrop,
+paned, paned:backdrop { background-color: transparent; background-image: none; color: #f2f2f2; border: none; box-shadow: none; }
+menubar, menubar > menuitem { color: #f2f2f2; }
+menubar > menuitem:hover { background-color: alpha(@wall_accent, 0.30); border-radius: 8px; }
+notebook, notebook:backdrop, notebook > stack, notebook > stack:backdrop, notebook > header, notebook > header:backdrop,
+notebook > header > tabs, dialog, dialog:backdrop, dialog .dialog-vbox, dialog .dialog-action-area, .dialog-vbox, messagedialog, messagedialog:backdrop,
+stack, viewport, grid, box, frame, frame > border { background-color: transparent; background-image: none; box-shadow: none; }
+notebook { border: none; }
+notebook > header { border: none; }
+notebook > header > tabs > tab { color: alpha(#f2f2f2, 0.6); border-radius: 10px; border: none; background-image: none; padding: 4px 12px; }
+notebook > header > tabs > tab:checked { color: #ffffff; background-color: alpha(@wall_accent, 0.30); }
+notebook > header > tabs > tab:hover:not(:checked) { background-color: alpha(white, 0.07); }
+label, label:backdrop { color: #f2f2f2; }
+label:disabled, label.dim-label { color: alpha(#f2f2f2, 0.55); }
+progressbar trough, levelbar trough { background-color: alpha(white, 0.12); border-radius: 8px; border: none; }
+progressbar progress, levelbar block.filled { background-color: @wall_accent; border-radius: 8px; border: none; }
+entry selection, label selection, selection { background-color: @wall_accent; color: @wall_accent_fg; }
+list, list:backdrop, listbox, listbox:backdrop, list > row, listbox > row, list > row:backdrop, treeview, treeview:backdrop,
+textview, textview text, textview:backdrop, textview:backdrop text, .frame, frame > border, scrolledwindow > viewport, cell, .cell, iconview { background-color: transparent; background-image: none; color: #f2f2f2; }
+list > row:selected, listbox > row:selected, list > row:selected:backdrop, row:selected, row:selected:backdrop, treeview:selected, treeview:selected:backdrop, cell:selected {
+    background-color: alpha(@wall_accent, 0.30); color: #ffffff; border-radius: 10px; }
+list > row:hover, listbox > row:hover { background-color: alpha(white, 0.07); border-radius: 10px; }
+paned > separator { background-color: alpha(white, 0.06); background-image: none; }
+
+.view:selected, .view:selected:backdrop, iconview:selected, iconview:selected:backdrop,
+treeview.view:selected, treeview.view:selected:backdrop, .sidebar row:selected, .sidebar row:selected:backdrop {
+    background-color: alpha(@wall_accent, 0.30); color: #ffffff; border-radius: 10px; }
+.view:hover, iconview:hover, treeview.view:hover { background-color: alpha(white, 0.07); border-radius: 10px; }
+
+button, button:backdrop, entry, entry:backdrop { border-radius: 12px; background-image: none; background-color: alpha(white, 0.07); border: 1px solid alpha(white, 0.08); box-shadow: none; color: #f2f2f2; }
+button:hover { background-color: alpha(white, 0.14); }
+button:checked, button:active { background-color: alpha(@wall_accent, 0.35); }
+entry:focus { border-color: @wall_accent; }
+
+menu, .menu, popover, popover.background, .popup, tooltip { background-color: #18181c; color: #f2f2f2; border-radius: 14px; border: 1px solid alpha(@wall_accent, 0.4); }
+menuitem:hover, modelbutton:hover { background-color: alpha(@wall_accent, 0.30); border-radius: 8px; }
+scrollbar slider { background-color: alpha(white, 0.25); border-radius: 8px; }

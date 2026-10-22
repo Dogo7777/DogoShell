@@ -1,0 +1,37 @@
+/* gerado por wallcolors.py */
+@define-color accent_bg_color #579fd9;
+@define-color accent_color #579fd9;
+@define-color accent_fg_color #ffffff;
+@define-color window_bg_color rgba(8, 8, 10, 0.72);
+@define-color window_fg_color #f2f2f2;
+@define-color view_bg_color rgba(8, 8, 10, 0.35);
+@define-color headerbar_bg_color transparent;
+@define-color headerbar_backdrop_color transparent;
+@define-color headerbar_fg_color #f2f2f2;
+@define-color headerbar_border_color transparent;
+@define-color sidebar_bg_color transparent;
+@define-color sidebar_backdrop_color transparent;
+@define-color sidebar_border_color transparent;
+@define-color sidebar_shade_color transparent;
+@define-color sidebar_fg_color #f2f2f2;
+@define-color card_bg_color rgba(255, 255, 255, 0.06);
+@define-color popover_bg_color #18181c;
+@define-color dialog_bg_color #18181c;
+
+window.background { border: 1px solid alpha(@accent_bg_color, 0.55); }
+headerbar, headerbar:backdrop, .top-bar, toolbarview > .top-bar { background: transparent; box-shadow: none; border: none; }
+.sidebar-pane, .sidebar-pane:backdrop, .navigation-sidebar, placessidebar, placessidebar list { background: transparent; border: none; box-shadow: none; }
+.sidebar-pane, .sidebar-pane:backdrop, .sidebar-pane .navigation-sidebar, .navigation-sidebar, placessidebar, placessidebar list { background: transparent; background-color: transparent; box-shadow: none; border: none; }
+.sidebar-pane headerbar, .sidebar-pane headerbar:backdrop { background: transparent; }
+separator.spacer, .sidebar-pane separator { background: alpha(white, 0.08); }
+window:backdrop .sidebar-pane, window:backdrop .sidebar-pane:backdrop, window:backdrop .navigation-sidebar, window:backdrop placessidebar, window:backdrop placessidebar list, window:backdrop headerbar, window:backdrop .top-bar, window:backdrop toolbarview, window.background:backdrop { background: transparent; background-color: transparent; box-shadow: none; border-color: transparent; }
+window:backdrop .navigation-sidebar row:selected { background: alpha(@accent_bg_color, 0.20); }
+window:backdrop, window:backdrop * { opacity: 1; filter: none; }
+separator { background: alpha(white, 0.08); }
+window:backdrop { opacity: 1; }
+.navigation-sidebar row { border-radius: 12px; margin: 2px 6px; transition: background 200ms ease; }
+.navigation-sidebar row:selected { background: alpha(@accent_bg_color, 0.28); }
+.navigation-sidebar row:hover:not(:selected) { background: alpha(white, 0.07); }
+.view:selected, row:selected, flowboxchild:selected { background: alpha(@accent_bg_color, 0.30); border-radius: 10px; }
+entry, .path-bar button, button { border-radius: 12px; }
+popover > contents { border-radius: 16px; border: 1px solid alpha(@accent_bg_color, 0.4); }

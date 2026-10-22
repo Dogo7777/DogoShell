@@ -1,0 +1,714 @@
+import Quickshell
+import Quickshell.Hyprland
+import Quickshell.Io
+import Quickshell.Services.Mpris
+import Quickshell.Services.Pipewire
+import Quickshell.Services.SystemTray
+import Quickshell.Wayland
+import Quickshell.Widgets
+import QtQuick
+import QtQuick.Layouts
+
+ShellRoot {
+    id: root
+
+    // ------------------------------------------------------------------
+    // Ajustes rápidos
+    // ------------------------------------------------------------------
+    readonly property int animMs: 620        // duração base da animação
+    readonly property int minWorkspaces: 4   // workspaces sempre visíveis
+    readonly property real bgAlpha: 0.55     // transparência do fundo
+    readonly property int panelW: 400        // largura da ilha aberta
+    readonly property int topH: 36           // altura da pílula
+
+    // ------------------------------------------------------------------
+    // Cor do wallpaper (gerada por wallcolors.py em colors.json)
+    // ------------------------------------------------------------------
+    FileView {
+        id: colorFile
+        path: Quickshell.shellPath("colors.json")
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        adapter: JsonAdapter {
+            property string accent: "#3948d9"
+            property string accent2: "#d95667"
+        }
+    }
+
+    readonly property color accentRaw: colorFile.adapter.accent
+    property color accent: accentRaw
+    Behavior on accent { ColorAnimation { duration: 700 } }
+    readonly property color accentFg:
+        (0.299 * accent.r + 0.587 * accent.g + 0.114 * accent.b) > 0.6 ? "#000000" : "#ffffff"
+
+    // ------------------------------------------------------------------
+    // Dados do sistema
+    // ------------------------------------------------------------------
+    property string cpu: "0"
+    property string mem: "0"
+    property string temp: "0"
+    property string disk: "0"
+    property string iface: "offline"
+
+    Process {
+        running: true
+        command: ["bash", Quickshell.shellPath("stats.sh")]
+        stdout: SplitParser {
+            onRead: data => {
+                const p = data.trim().split(" ");
+                if (p.length < 5) return;
+                root.cpu = p[0]; root.mem = p[1]; root.temp = p[2];
+                root.disk = p[3]; root.iface = p[4];
+            }
+        }
+    }
+
+    SystemClock {
+        id: clock
+        precision: SystemClock.Minutes
+    }
+
+    // Áudio
+    PwObjectTracker { objects: [Pipewire.defaultAudioSink] }
+    readonly property var sink: Pipewire.defaultAudioSink
+    readonly property real vol: sink && sink.audio ? sink.audio.volume : 0
+    readonly property bool muted: sink && sink.audio ? sink.audio.muted : false
+    function setVol(v) {
+        if (sink && sink.audio) sink.audio.volume = Math.max(0, Math.min(1, v));
+    }
+
+    // Workspaces
+    property int wsCount: {
+        let m = root.minWorkspaces;
+        const v = Hyprland.workspaces.values;
+        for (let i = 0; i < v.length; i++)
+            if (v[i].id > m) m = v[i].id;
+        const f = Hyprland.focusedWorkspace;
+        if (f && f.id > m) m = f.id;
+        return m;
+    }
+
+    // Player: o que está tocando; senão o primeiro
+    property var player: {
+        const v = Mpris.players.values;
+        for (let i = 0; i < v.length; i++)
+            if (v[i].playbackState === MprisPlaybackState.Playing) return v[i];
+        return v.length > 0 ? v[0] : null;
+    }
+    readonly property bool playing:
+        player !== null && player.playbackState === MprisPlaybackState.Playing
+    readonly property real ratio:
+        player && player.length > 0 ? Math.min(1, player.position / player.length) : 0
+
+    Timer {
+        interval: 500
+        repeat: true
+        running: root.playing && island.expanded
+        onTriggered: root.player.positionChanged()
+    }
+
+    property bool caffeine: false   // impede a tela de apagar
+    property int menuOpen: 0        // menus do tray abertos
+
+    function fmt(s) {
+        s = Math.max(0, Math.floor(s || 0));
+        const m = Math.floor(s / 60), r = s % 60;
+        return m + ":" + (r < 10 ? "0" : "") + r;
+    }
+
+    // ------------------------------------------------------------------
+    // Componentes reutilizáveis
+    // ------------------------------------------------------------------
+    component T: Text {
+        color: "#d0d0d0"
+        font.family: "JetBrainsMono Nerd Font"
+        font.pixelSize: 13
+        font.bold: true
+        verticalAlignment: Text.AlignVCenter
+    }
+
+    component IconButton: Rectangle {
+        id: btn
+        property alias text: lbl.text
+        property color fg: "#ffffff"
+        property color hoverFg: fg
+        property real iconSize: 15
+        signal clicked()
+        radius: height / 2
+        color: ma.containsMouse ? "#26ffffff" : "transparent"
+        scale: ma.pressed ? 0.88 : 1
+        Behavior on color { ColorAnimation { duration: 180 } }
+        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+        T {
+            id: lbl
+            anchors.centerIn: parent
+            color: ma.containsMouse ? btn.hoverFg : btn.fg
+            font.pixelSize: btn.iconSize
+            Behavior on color { ColorAnimation { duration: 180 } }
+        }
+        MouseArea {
+            id: ma
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: btn.clicked()
+        }
+    }
+
+    // Slider fino (volume e timeline): preenche com a cor do wallpaper
+    component Track: Item {
+        id: trk
+        property real value: 0          // 0..1 mostrado
+        property bool animate: true
+        signal moved(real ratio)
+        implicitHeight: 22
+
+        readonly property alias pressed: tma.pressed
+        readonly property alias hovered: tma.containsMouse
+        readonly property real shown: tma.pressed ? Math.max(0, Math.min(1, tma.mouseX / width)) : value
+
+        Rectangle {
+            id: rail
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width
+            height: tma.containsMouse || tma.pressed ? 7 : 4
+            radius: height / 2
+            color: "#2effffff"
+            Behavior on height { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+
+            Rectangle {
+                width: rail.width * trk.shown
+                height: parent.height
+                radius: parent.radius
+                color: root.accent
+                Behavior on width {
+                    enabled: trk.animate && !tma.pressed
+                    NumberAnimation { duration: 450 }
+                }
+            }
+        }
+
+        Rectangle {
+            width: 12
+            height: 12
+            radius: 6
+            color: "#ffffff"
+            anchors.verticalCenter: parent.verticalCenter
+            x: rail.width * trk.shown - 6
+            opacity: tma.containsMouse || tma.pressed ? 1 : 0
+            scale: tma.pressed ? 1.25 : 1
+            Behavior on opacity { NumberAnimation { duration: 150 } }
+            Behavior on scale { NumberAnimation { duration: 120 } }
+        }
+
+        MouseArea {
+            id: tma
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onPressed: mouse => trk.moved(Math.max(0, Math.min(1, mouse.x / width)))
+            onPositionChanged: mouse => {
+                if (pressed) trk.moved(Math.max(0, Math.min(1, mouse.x / width)));
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Janela
+    // ------------------------------------------------------------------
+    PanelWindow {
+        id: win
+        anchors.top: true
+        margins.top: 6
+        implicitWidth: root.panelW + 80
+        implicitHeight: 340
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Top
+        WlrLayershell.namespace: "island"
+
+        // Só a ilha recebe cliques; o resto do topo continua clicável
+        mask: Region { item: island }
+
+        IdleInhibitor {
+            enabled: root.caffeine
+            window: win
+        }
+
+        Rectangle {
+            id: island
+            property bool expanded: false
+
+            // 0 → 1 enquanto abre; usado para entrada escalonada do conteúdo
+            property real reveal: expanded ? 1 : 0
+            Behavior on reveal {
+                NumberAnimation {
+                    duration: island.expanded ? root.animMs + 250 : 200
+                    easing.type: Easing.OutCubic
+                }
+            }
+            function stag(i) {
+                return Math.max(0, Math.min(1, (reveal - i * 0.13) / 0.5));
+            }
+
+            readonly property real pad: 14
+            readonly property real sideW: Math.max(100, root.wsCount * 24 + 16)
+            readonly property real collapsedW: 2 * sideW + clockText.implicitWidth + 2 * pad + 12
+            readonly property real expandedW: Math.max(root.panelW, collapsedW)
+
+            anchors.top: parent.top
+            anchors.horizontalCenter: parent.horizontalCenter
+            clip: true
+
+            width: expanded ? expandedW : collapsedW
+            height: expanded ? root.topH + panel.implicitHeight + 16 : root.topH
+            radius: expanded ? 26 : root.topH / 2
+            color: Qt.rgba(0, 0, 0, root.bgAlpha)
+            border.width: 1
+            border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.55)
+
+            Behavior on width {
+                NumberAnimation {
+                    duration: root.animMs
+                    easing.type: island.expanded ? Easing.OutBack : Easing.InOutCubic
+                    easing.overshoot: 0.9
+                }
+            }
+            Behavior on height {
+                NumberAnimation {
+                    duration: root.animMs
+                    easing.type: island.expanded ? Easing.OutBack : Easing.InOutCubic
+                    easing.overshoot: 0.9
+                }
+            }
+            Behavior on radius {
+                NumberAnimation { duration: root.animMs; easing.type: Easing.InOutCubic }
+            }
+
+            // ---------------- Linha de cima (sempre visível) ----------------
+            Item {
+                id: topRow
+                width: parent.width
+                height: root.topH
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: island.expanded = !island.expanded
+                }
+
+                // Workspaces (esquerda): o ativo vira uma pílula na cor do wallpaper
+                Row {
+                    id: wsRow
+                    anchors.left: parent.left
+                    anchors.leftMargin: island.pad
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 3
+
+                    Repeater {
+                        model: root.wsCount
+                        delegate: Rectangle {
+                            id: wsItem
+                            required property int index
+                            readonly property int wsId: index + 1
+                            readonly property bool active: Hyprland.focusedWorkspace !== null
+                                && Hyprland.focusedWorkspace.id === wsId
+                            width: active ? 30 : 20
+                            height: 22
+                            radius: 11
+                            color: active ? root.accent
+                                          : (wsMa.containsMouse ? "#26ffffff" : "transparent")
+                            Behavior on width {
+                                NumberAnimation { duration: 340; easing.type: Easing.OutBack; easing.overshoot: 1.3 }
+                            }
+                            Behavior on color { ColorAnimation { duration: 260 } }
+                            T {
+                                anchors.centerIn: parent
+                                text: wsItem.wsId
+                                color: wsItem.active ? root.accentFg : "#777777"
+                                Behavior on color { ColorAnimation { duration: 260 } }
+                            }
+                            MouseArea {
+                                id: wsMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: Hyprland.dispatch("workspace " + wsItem.wsId)
+                            }
+                        }
+                    }
+                }
+
+                // Relógio (sempre no centro exato)
+                T {
+                    id: clockText
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "  " + Qt.formatDateTime(clock.date, "HH:mm")
+                    color: "#ffffff"
+                }
+
+                // Volume (direita) + equalizador quando há música tocando
+                Row {
+                    id: volRow
+                    anchors.right: parent.right
+                    anchors.rightMargin: island.pad
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 8
+
+                    Item {
+                        width: 14
+                        height: 14
+                        visible: root.playing
+                        Repeater {
+                            model: 3
+                            delegate: Rectangle {
+                                id: bar
+                                required property int index
+                                x: index * 5
+                                anchors.bottom: parent.bottom
+                                width: 3
+                                height: 5
+                                radius: 1.5
+                                color: root.accent
+                                SequentialAnimation on height {
+                                    running: root.playing
+                                    loops: Animation.Infinite
+                                    NumberAnimation { to: 14; duration: 380 + bar.index * 130; easing.type: Easing.InOutSine }
+                                    NumberAnimation { to: 4; duration: 420 + bar.index * 90; easing.type: Easing.InOutSine }
+                                }
+                            }
+                        }
+                    }
+
+                    T {
+                        color: root.muted ? "#666666" : "#ffffff"
+                        text: {
+                            if (root.muted) return "";
+                            const icon = root.vol < 0.34 ? "" : (root.vol < 0.67 ? "" : "");
+                            return icon + " " + Math.round(root.vol * 100) + "%";
+                        }
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: volRow
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: mouse => {
+                        if (mouse.button === Qt.RightButton)
+                            Quickshell.execDetached(["pavucontrol"]);
+                        else if (root.sink && root.sink.audio)
+                            root.sink.audio.muted = !root.sink.audio.muted;
+                    }
+                    onWheel: wheel => root.setVol(root.vol + (wheel.angleDelta.y > 0 ? 0.05 : -0.05))
+                }
+            }
+
+            // ---------------- Painel (abre para baixo) ----------------
+            ColumnLayout {
+                id: panel
+                anchors.top: topRow.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: island.pad + 4
+                anchors.rightMargin: island.pad + 4
+                spacing: 10
+                visible: island.reveal > 0.01
+
+                // Estatísticas
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 26
+                    opacity: island.stag(0)
+                    transform: Translate { y: (1 - island.stag(0)) * 10 }
+
+                    T {
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        text: "  " + root.cpu + "%"
+                        color: parseInt(root.cpu) >= 90 ? "#ff5555" : "#d0d0d0"
+                    }
+                    T {
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        text: "  " + root.mem + "%"
+                        color: parseInt(root.mem) >= 90 ? "#ff5555" : "#d0d0d0"
+                    }
+                    T {
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        text: "  " + root.temp + "°C"
+                        color: parseInt(root.temp) >= 85 ? "#ff5555"
+                             : (parseInt(root.temp) >= 70 ? "#ffaa44" : "#d0d0d0")
+                    }
+                }
+
+                // Volume (slider)
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 26
+                    spacing: 10
+                    opacity: island.stag(1)
+                    transform: Translate { y: (1 - island.stag(1)) * 10 }
+
+                    IconButton {
+                        Layout.preferredWidth: 28
+                        Layout.preferredHeight: 26
+                        iconSize: 14
+                        text: root.muted ? ""
+                              : (root.vol < 0.34 ? "" : (root.vol < 0.67 ? "" : ""))
+                        fg: root.muted ? "#666666" : "#d0d0d0"
+                        onClicked: {
+                            if (root.sink && root.sink.audio)
+                                root.sink.audio.muted = !root.sink.audio.muted;
+                        }
+                    }
+                    Track {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 22
+                        value: root.vol
+                        animate: false
+                        onMoved: ratio => root.setVol(ratio)
+                    }
+                    T {
+                        Layout.preferredWidth: 38
+                        horizontalAlignment: Text.AlignRight
+                        text: Math.round(root.vol * 100) + "%"
+                    }
+                }
+
+                // Rede | café | tray | power
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 30
+                    spacing: 6
+                    opacity: island.stag(2)
+                    transform: Translate { y: (1 - island.stag(2)) * 10 }
+
+                    T {
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        text: root.iface === "offline"
+                            ? "  offline"
+                            : (root.iface.startsWith("w") ? "  " : "  ") + root.iface
+                        color: root.iface === "offline" ? "#ff5555" : "#d0d0d0"
+                    }
+
+                    // Tela sempre ligada
+                    IconButton {
+                        Layout.preferredWidth: 30
+                        Layout.preferredHeight: 28
+                        text: root.caffeine ? "" : ""
+                        fg: root.caffeine ? root.accent : "#666666"
+                        hoverFg: "#ffffff"
+                        onClicked: root.caffeine = !root.caffeine
+                    }
+
+                    // Tray
+                    Row {
+                        spacing: 4
+                        Repeater {
+                            model: SystemTray.items
+                            delegate: Item {
+                                id: ti
+                                required property var modelData
+                                width: 26
+                                height: 26
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 13
+                                    color: tma.containsMouse ? "#26ffffff" : "transparent"
+                                    Behavior on color { ColorAnimation { duration: 160 } }
+                                }
+                                IconImage {
+                                    anchors.centerIn: parent
+                                    implicitSize: 16
+                                    source: ti.modelData.icon
+                                    scale: tma.pressed ? 0.85 : 1
+                                    Behavior on scale { NumberAnimation { duration: 120 } }
+                                }
+
+                                QsMenuAnchor {
+                                    id: menuAnchor
+                                    menu: ti.modelData.menu
+                                    anchor.window: win
+                                    onOpened: root.menuOpen++
+                                    onClosed: root.menuOpen = Math.max(0, root.menuOpen - 1)
+                                }
+
+                                MouseArea {
+                                    id: tma
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                                    onClicked: mouse => {
+                                        if (mouse.button === Qt.MiddleButton) {
+                                            ti.modelData.secondaryActivate();
+                                        } else if (mouse.button === Qt.LeftButton && !ti.modelData.onlyMenu) {
+                                            ti.modelData.activate();
+                                        } else if (ti.modelData.hasMenu) {
+                                            const p = ti.mapToItem(null, 0, ti.height + 4);
+                                            menuAnchor.anchor.rect.x = p.x;
+                                            menuAnchor.anchor.rect.y = p.y;
+                                            menuAnchor.anchor.rect.width = ti.width;
+                                            menuAnchor.anchor.rect.height = 1;
+                                            menuAnchor.open();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Energia
+                    IconButton {
+                        Layout.preferredWidth: 30
+                        Layout.preferredHeight: 28
+                        text: ""
+                        fg: "#cccccc"
+                        hoverFg: "#ff5555"
+                        onClicked: Quickshell.execDetached(["wlogout"])
+                    }
+                }
+
+                // ---------------- Mídia (só com player ativo) ----------------
+                ColumnLayout {
+                    id: media
+                    Layout.fillWidth: true
+                    visible: root.player !== null
+                    spacing: 6
+                    opacity: island.stag(3)
+                    transform: Translate { y: (1 - island.stag(3)) * 10 }
+
+                    // Divisória
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: "#1affffff"
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 50
+                        spacing: 10
+
+                        ClippingRectangle {
+                            Layout.preferredWidth: 46
+                            Layout.preferredHeight: 46
+                            radius: 12
+                            color: "#22ffffff"
+
+                            Image {
+                                anchors.fill: parent
+                                source: root.player ? root.player.trackArtUrl : ""
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                visible: status === Image.Ready
+                            }
+                            T {
+                                anchors.centerIn: parent
+                                text: ""
+                                color: "#777777"
+                                visible: !(root.player && root.player.trackArtUrl)
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            spacing: 0
+
+                            T {
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                elide: Text.ElideRight
+                                color: "#ffffff"
+                                text: root.player && root.player.trackTitle
+                                      ? root.player.trackTitle : "Sem título"
+                            }
+                            T {
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                elide: Text.ElideRight
+                                color: "#9a9a9a"
+                                font.pixelSize: 11
+                                text: root.player && root.player.trackArtist ? root.player.trackArtist : ""
+                            }
+                        }
+
+                        IconButton {
+                            Layout.preferredWidth: 32
+                            Layout.preferredHeight: 32
+                            text: ""
+                            onClicked: if (root.player) root.player.previous()
+                        }
+                        IconButton {
+                            Layout.preferredWidth: 38
+                            Layout.preferredHeight: 38
+                            iconSize: 17
+                            text: root.playing ? "" : ""
+                            fg: root.accentFg
+                            hoverFg: root.accentFg
+                            onClicked: if (root.player) root.player.togglePlaying()
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: width / 2
+                                color: root.accent
+                                z: -1
+                                scale: 1
+                            }
+                        }
+                        IconButton {
+                            Layout.preferredWidth: 32
+                            Layout.preferredHeight: 32
+                            text: ""
+                            onClicked: if (root.player) root.player.next()
+                        }
+                    }
+
+                    // Timeline estilo YouTube: enche até o fim da música; clique/arraste para pular
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 22
+                        spacing: 8
+
+                        T {
+                            Layout.preferredWidth: 38
+                            horizontalAlignment: Text.AlignRight
+                            color: "#aaaaaa"
+                            font.pixelSize: 12
+                            text: root.fmt(root.player ? root.player.position : 0)
+                        }
+                        Track {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 22
+                            value: root.ratio
+                            onMoved: ratio => {
+                                const p = root.player;
+                                if (p && p.canSeek && p.length > 0)
+                                    p.position = ratio * p.length;
+                            }
+                        }
+                        T {
+                            Layout.preferredWidth: 38
+                            color: "#aaaaaa"
+                            font.pixelSize: 12
+                            text: root.fmt(root.player ? root.player.length : 0)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Clicou fora da ilha => recolhe (menos enquanto um menu do tray está aberto)
+    HyprlandFocusGrab {
+        windows: [win]
+        active: island.expanded && root.menuOpen === 0
+        onCleared: island.expanded = false
+    }
+}

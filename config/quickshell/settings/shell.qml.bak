@@ -1,0 +1,655 @@
+import Quickshell
+import Quickshell.Io
+import Quickshell.Wayland
+import QtQuick
+import QtQuick.Layouts
+
+// Configurações do visual e dos atalhos.   qs -c settings   (SUPER + ,)
+ShellRoot {
+    id: root
+
+    // ---------------- cores (seguem o wallpaper) ----------------
+    FileView {
+        path: Quickshell.shellPath("../island/colors.json")
+        watchChanges: true
+        printErrors: false
+        adapter: JsonAdapter { id: colorAd; property string accent: "#3948d9" }
+    }
+    readonly property color accent: colorAd.accent
+    readonly property color accentFg:
+        (0.299 * accent.r + 0.587 * accent.g + 0.114 * accent.b) > 0.6 ? "#000000" : "#ffffff"
+    function accA(a) { return Qt.rgba(accent.r, accent.g, accent.b, a); }
+
+    // ---------------- estado ----------------
+    property var st: ({ binds: {} })
+    property int page: 0
+    property string capName: ""
+    property real reveal: 0
+    property bool closing: false
+
+    Behavior on reveal {
+        NumberAnimation {
+            duration: root.closing ? 240 : 560
+            easing.type: root.closing ? Easing.InCubic : Easing.OutQuint
+        }
+    }
+    Timer { running: true; interval: 30; onTriggered: root.reveal = 1 }
+    Timer { id: quitTimer; interval: 260; onTriggered: Qt.quit() }
+    Timer { id: refetch; interval: 900; onTriggered: getProc.running = true }
+
+    function close() {
+        if (closing) return;
+        closing = true;
+        reveal = 0;
+        quitTimer.start();
+    }
+
+    Process {
+        id: getProc
+        running: true
+        command: ["python3", Quickshell.shellPath("settings.py"), "get"]
+        stdout: SplitParser {
+            onRead: data => {
+                try { if (data.trim() !== "") root.st = JSON.parse(data); } catch (e) {}
+            }
+        }
+    }
+
+    function setVal(k, v) {
+        const n = Object.assign({}, st);
+        n[k] = v;
+        st = n;
+        Quickshell.execDetached(["python3", Quickshell.shellPath("settings.py"), "set", k, JSON.stringify(v)]);
+    }
+
+    function resetAll() {
+        Quickshell.execDetached(["python3", Quickshell.shellPath("settings.py"), "reset"]);
+        refetch.restart();
+    }
+
+    // ---------------- atalhos ----------------
+    readonly property var bindDefs: [
+        { id: "terminal",    label: "Terminal" },
+        { id: "filemanager", label: "Gerenciador de arquivos" },
+        { id: "launcher",    label: "Launcher" },
+        { id: "launcher2",   label: "Launcher (alternativo)" },
+        { id: "wallpaper",   label: "Escolher wallpaper" },
+        { id: "power",       label: "Menu de energia" },
+        { id: "lock",        label: "Bloquear tela" },
+        { id: "settings",    label: "Configurações" },
+        { id: "close",       label: "Fechar janela" },
+        { id: "float",       label: "Alternar flutuante" }
+    ]
+    readonly property var modOrder: ["SUPER", "CTRL", "ALT", "SHIFT"]
+
+    function comboOf(id) { return (st.binds && st.binds[id]) ? st.binds[id] : ""; }
+    function modsOf(id) {
+        const p = comboOf(id).split(" + ");
+        return p.slice(0, Math.max(0, p.length - 1));
+    }
+    function keyOf(id) {
+        const p = comboOf(id).split(" + ");
+        return p.length ? p[p.length - 1] : "";
+    }
+    function buildCombo(mods, key) {
+        const m = [];
+        for (let i = 0; i < modOrder.length; i++)
+            if (mods.indexOf(modOrder[i]) >= 0) m.push(modOrder[i]);
+        m.push(key);
+        return m.join(" + ");
+    }
+    function setBind(id, combo) {
+        const b = Object.assign({}, st.binds);
+        b[id] = combo;
+        const n = Object.assign({}, st);
+        n.binds = b;
+        st = n;
+        Quickshell.execDetached(["python3", Quickshell.shellPath("settings.py"), "set", "binds", JSON.stringify(b)]);
+    }
+    function toggleMod(id, mod) {
+        const mods = modsOf(id).slice();
+        const i = mods.indexOf(mod);
+        if (i >= 0) mods.splice(i, 1); else mods.push(mod);
+        setBind(id, buildCombo(mods, keyOf(id)));
+    }
+    function dupCount(id) {
+        const c = comboOf(id);
+        let n = 0;
+        for (let i = 0; i < bindDefs.length; i++)
+            if (comboOf(bindDefs[i].id) === c) n++;
+        return n;
+    }
+    function keyName(k) {
+        if (k >= Qt.Key_A && k <= Qt.Key_Z) return String.fromCharCode(k);
+        if (k >= Qt.Key_0 && k <= Qt.Key_9) return String.fromCharCode(k);
+        if (k >= Qt.Key_F1 && k <= Qt.Key_F12) return "F" + (k - Qt.Key_F1 + 1);
+        const m = {};
+        m[Qt.Key_Space] = "SPACE"; m[Qt.Key_Return] = "RETURN"; m[Qt.Key_Enter] = "RETURN";
+        m[Qt.Key_Tab] = "TAB"; m[Qt.Key_Print] = "Print";
+        m[Qt.Key_Left] = "left"; m[Qt.Key_Right] = "right"; m[Qt.Key_Up] = "up"; m[Qt.Key_Down] = "down";
+        m[Qt.Key_Comma] = "comma"; m[Qt.Key_Period] = "period"; m[Qt.Key_Minus] = "minus";
+        m[Qt.Key_Equal] = "equal"; m[Qt.Key_Slash] = "slash"; m[Qt.Key_Semicolon] = "semicolon";
+        m[Qt.Key_Backslash] = "backslash"; m[Qt.Key_BracketLeft] = "bracketleft";
+        m[Qt.Key_BracketRight] = "bracketright"; m[Qt.Key_Delete] = "Delete";
+        m[Qt.Key_Home] = "Home"; m[Qt.Key_End] = "End"; m[Qt.Key_PageUp] = "Prior"; m[Qt.Key_PageDown] = "Next";
+        return m[k] || "";
+    }
+
+    // ---------------- componentes ----------------
+    component T: Text {
+        color: "#d8d8d8"
+        font.family: "JetBrainsMono Nerd Font"
+        font.pixelSize: 13
+        font.bold: true
+        verticalAlignment: Text.AlignVCenter
+    }
+
+    // linha "rótulo ........ controle"
+    component Opt: Item {
+        id: o
+        property string label: ""
+        property string hint: ""
+        default property alias ctrl: slot.data
+        width: parent ? parent.width : 400
+        height: 50
+        Column {
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 1
+            T { text: o.label; color: "#ffffff"; font.pixelSize: 14 }
+            T { text: o.hint; visible: o.hint !== ""; color: "#7a7a7a"; font.pixelSize: 11; font.bold: false }
+        }
+        RowLayout {
+            id: slot
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            spacing: 8
+        }
+    }
+
+    component Toggle: Rectangle {
+        id: tg
+        property bool on: false
+        signal toggled(bool v)
+        implicitWidth: 48
+        implicitHeight: 26
+        radius: 13
+        color: on ? root.accent : "#33ffffff"
+        Behavior on color { ColorAnimation { duration: 200 } }
+        Rectangle {
+            width: 20; height: 20; radius: 10
+            y: 3
+            x: tg.on ? tg.width - width - 3 : 3
+            color: tg.on ? root.accentFg : "#ffffff"
+            Behavior on x { NumberAnimation { duration: 260; easing.type: Easing.OutBack } }
+            Behavior on color { ColorAnimation { duration: 200 } }
+        }
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: tg.toggled(!tg.on)
+        }
+    }
+
+    component Seg: Row {
+        id: sg
+        property var opts: []      // [[valor, rótulo], ...]
+        property string cur: ""
+        signal picked(string v)
+        spacing: 6
+        Repeater {
+            model: sg.opts
+            delegate: Rectangle {
+                id: chip
+                required property var modelData
+                readonly property bool on: sg.cur === modelData[0]
+                width: lbl.implicitWidth + 28
+                height: 32
+                radius: 16
+                color: on ? root.accent : (cma.containsMouse ? "#26ffffff" : "transparent")
+                border.width: 1
+                border.color: on ? "transparent" : "#33ffffff"
+                scale: cma.pressed ? 0.94 : 1.0
+                Behavior on color { ColorAnimation { duration: 180 } }
+                Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutBack } }
+                T { id: lbl; anchors.centerIn: parent; text: chip.modelData[1]; font.pixelSize: 12; color: chip.on ? root.accentFg : "#dddddd" }
+                MouseArea {
+                    id: cma
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: sg.picked(chip.modelData[0])
+                }
+            }
+        }
+    }
+
+    component Sld: Item {
+        id: s
+        property real from: 0
+        property real to: 1
+        property real step: 0.1
+        property real value: 0
+        property real shown: value
+        property int decimals: 0
+        signal committed(real v)
+        implicitWidth: 270
+        implicitHeight: 28
+        onValueChanged: if (!sma.pressed) shown = value
+
+        Rectangle {
+            id: track
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width - 58
+            height: 6
+            radius: 3
+            color: "#26ffffff"
+            Rectangle {
+                width: Math.max(0, Math.min(1, (s.shown - s.from) / (s.to - s.from))) * track.width
+                height: parent.height
+                radius: 3
+                color: root.accent
+            }
+            Rectangle {
+                width: 16; height: 16; radius: 8
+                anchors.verticalCenter: parent.verticalCenter
+                x: Math.max(0, Math.min(1, (s.shown - s.from) / (s.to - s.from))) * (track.width - width)
+                color: "#ffffff"
+                scale: sma.pressed ? 1.2 : 1.0
+                Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutBack } }
+            }
+        }
+        T {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            width: 50
+            horizontalAlignment: Text.AlignRight
+            text: s.shown.toFixed(s.decimals)
+            font.pixelSize: 12
+            color: "#bbbbbb"
+        }
+        MouseArea {
+            id: sma
+            anchors.fill: track
+            anchors.topMargin: -10
+            anchors.bottomMargin: -10
+            cursorShape: Qt.PointingHandCursor
+            function upd(x) {
+                const r = Math.max(0, Math.min(1, x / track.width));
+                let v = s.from + r * (s.to - s.from);
+                v = Math.round(v / s.step) * s.step;
+                s.shown = Math.max(s.from, Math.min(s.to, v));
+            }
+            onPressed: mouse => upd(mouse.x)
+            onPositionChanged: mouse => { if (pressed) upd(mouse.x); }
+            onReleased: s.committed(s.shown)
+        }
+    }
+
+    component Section: T {
+        color: root.accent
+        font.pixelSize: 11
+        font.letterSpacing: 1.5
+        topPadding: 10
+        bottomPadding: 2
+    }
+
+    // ---------------- janela ----------------
+    PanelWindow {
+        id: win
+        anchors { top: true; bottom: true; left: true; right: true }
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.namespace: "settings"
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+
+        Rectangle {
+            anchors.fill: parent
+            color: "#000000"
+            opacity: 0.45 * root.reveal
+            MouseArea { anchors.fill: parent; onClicked: root.close() }
+        }
+
+        Item {
+            anchors.fill: parent
+            focus: true
+            Component.onCompleted: forceActiveFocus()
+            Keys.onPressed: event => {
+                if (root.capName !== "") {
+                    if (event.key === Qt.Key_Escape) { root.capName = ""; event.accepted = true; return; }
+                    if (event.key === Qt.Key_Shift || event.key === Qt.Key_Control || event.key === Qt.Key_Alt
+                        || event.key === Qt.Key_Meta || event.key === Qt.Key_Super_L || event.key === Qt.Key_Super_R) {
+                        event.accepted = true; return;
+                    }
+                    const kn = root.keyName(event.key);
+                    if (kn !== "") {
+                        root.setBind(root.capName, root.buildCombo(root.modsOf(root.capName), kn));
+                        root.capName = "";
+                    }
+                    event.accepted = true;
+                    return;
+                }
+                if (event.key === Qt.Key_Escape) { root.close(); event.accepted = true; }
+            }
+        }
+
+        Rectangle {
+            id: card
+            readonly property real fullW: 880
+            readonly property real fullH: 580
+            width: 240 + (fullW - 240) * root.reveal
+            height: 56 + (fullH - 56) * root.reveal
+            anchors.centerIn: parent
+            radius: 30
+            color: Qt.rgba(0.03, 0.03, 0.04, 0.82)
+            border.width: 1
+            border.color: root.accA(0.55)
+            clip: true
+            opacity: Math.min(1, root.reveal * 3)
+            MouseArea { anchors.fill: parent; onClicked: root.capName = "" }
+
+            Item {
+                id: inner
+                x: 0; y: 0
+                width: card.fullW
+                height: card.fullH
+                opacity: Math.max(0, (root.reveal - 0.5) / 0.5)
+
+                // ---- barra lateral ----
+                Column {
+                    x: 18; y: 22
+                    width: 190
+                    spacing: 6
+                    T { text: "  Configurações"; color: "#ffffff"; font.pixelSize: 16; height: 34 }
+                    Item { width: 1; height: 8 }
+                    Repeater {
+                        model: [
+                            { n: "Aparência", g: "" },
+                            { n: "Janelas",   g: "" },
+                            { n: "Animações", g: "" },
+                            { n: "Atalhos",   g: "" },
+                            { n: "Sistema",   g: "" }
+                        ]
+                        delegate: Rectangle {
+                            id: tab
+                            required property var modelData
+                            required property int index
+                            readonly property bool on: root.page === index
+                            width: 190
+                            height: 42
+                            radius: 14
+                            color: on ? root.accA(0.22) : (tma.containsMouse ? "#14ffffff" : "transparent")
+                            border.width: 1
+                            border.color: on ? root.accA(0.55) : "transparent"
+                            Behavior on color { ColorAnimation { duration: 180 } }
+                            Row {
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
+                                anchors.leftMargin: 14
+                                spacing: 12
+                                T { text: tab.modelData.g; color: tab.on ? root.accent : "#999999"; font.pixelSize: 15 }
+                                T { text: tab.modelData.n; color: tab.on ? "#ffffff" : "#cccccc"; font.pixelSize: 13 }
+                            }
+                            MouseArea {
+                                id: tma
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: { root.page = tab.index; root.capName = ""; }
+                            }
+                        }
+                    }
+                }
+                Rectangle { x: 226; y: 22; width: 1; height: card.fullH - 44; color: "#1affffff" }
+
+                // ---- páginas ----
+                Item {
+                    x: 246; y: 18
+                    width: card.fullW - 246 - 24
+                    height: card.fullH - 36
+
+                    // 0 — Aparência
+                    Flickable {
+                        anchors.fill: parent
+                        visible: opacity > 0
+                        opacity: root.page === 0 ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 220 } }
+                        contentHeight: p0.height
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        Column {
+                            id: p0
+                            width: parent.width
+                            spacing: 2
+                            Section { text: "FORMATO" }
+                            Opt {
+                                label: "Cantos"; hint: "Janelas, ilha, launcher e menus"
+                                Seg {
+                                    opts: [["round", "Redondo"], ["soft", "Suave"], ["square", "Quadrado"]]
+                                    cur: root.st.shape || "round"
+                                    onPicked: v => root.setVal("shape", v)
+                                }
+                            }
+                            Section { text: "VIDRO" }
+                            Opt {
+                                label: "Blur nas janelas"
+                                Toggle { on: !!root.st.blur; onToggled: v => root.setVal("blur", v) }
+                            }
+                            Opt {
+                                label: "Intensidade do blur"; hint: "Tamanho do desfoque"
+                                Sld { from: 1; to: 12; step: 1; value: root.st.blur_size || 6; onCommitted: v => root.setVal("blur_size", v) }
+                            }
+                            Opt {
+                                label: "Qualidade do blur"; hint: "Mais camadas = mais suave, mais GPU"
+                                Sld { from: 1; to: 4; step: 1; value: root.st.blur_passes || 2; onCommitted: v => root.setVal("blur_passes", v) }
+                            }
+                            Opt {
+                                label: "Blur nos painéis"; hint: "Ilha, launcher, menu de energia, notificações"
+                                Toggle { on: !!root.st.shell_blur; onToggled: v => root.setVal("shell_blur", v) }
+                            }
+                            Section { text: "TRANSPARÊNCIA E SOMBRA" }
+                            Opt {
+                                label: "Opacidade da janela ativa"
+                                Sld { from: 0.5; to: 1; step: 0.05; decimals: 2; value: root.st.opacity_active || 1; onCommitted: v => root.setVal("opacity_active", v) }
+                            }
+                            Opt {
+                                label: "Opacidade das janelas inativas"
+                                Sld { from: 0.5; to: 1; step: 0.05; decimals: 2; value: root.st.opacity_inactive || 1; onCommitted: v => root.setVal("opacity_inactive", v) }
+                            }
+                            Opt {
+                                label: "Sombras nas janelas"
+                                Toggle { on: !!root.st.shadow; onToggled: v => root.setVal("shadow", v) }
+                            }
+                        }
+                    }
+
+                    // 1 — Janelas
+                    Flickable {
+                        anchors.fill: parent
+                        visible: opacity > 0
+                        opacity: root.page === 1 ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 220 } }
+                        contentHeight: p1.height
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        Column {
+                            id: p1
+                            width: parent.width
+                            spacing: 2
+                            Section { text: "ESPAÇAMENTO" }
+                            Opt {
+                                label: "Entre janelas"
+                                Sld { from: 0; to: 20; step: 1; value: root.st.gaps_in === undefined ? 5 : root.st.gaps_in; onCommitted: v => root.setVal("gaps_in", v) }
+                            }
+                            Opt {
+                                label: "Margem da tela"; hint: "Laterais e embaixo"
+                                Sld { from: 0; to: 40; step: 1; value: root.st.gaps_out === undefined ? 10 : root.st.gaps_out; onCommitted: v => root.setVal("gaps_out", v) }
+                            }
+                            Opt {
+                                label: "Margem do topo"; hint: "Espaço reservado para a ilha"
+                                Sld { from: 0; to: 80; step: 1; value: root.st.gaps_top === undefined ? 45 : root.st.gaps_top; onCommitted: v => root.setVal("gaps_top", v) }
+                            }
+                            Section { text: "BORDA" }
+                            Opt {
+                                label: "Espessura da borda"; hint: "A cor vem do wallpaper"
+                                Sld { from: 0; to: 6; step: 1; value: root.st.border === undefined ? 2 : root.st.border; onCommitted: v => root.setVal("border", v) }
+                            }
+                        }
+                    }
+
+                    // 2 — Animações
+                    Flickable {
+                        anchors.fill: parent
+                        visible: opacity > 0
+                        opacity: root.page === 2 ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 220 } }
+                        contentHeight: p2.height
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        Column {
+                            id: p2
+                            width: parent.width
+                            spacing: 2
+                            Section { text: "VELOCIDADE" }
+                            Opt {
+                                label: "Duração das animações"; hint: "1.0 normal · maior = mais lento · menor = mais rápido"
+                                Sld { from: 0.4; to: 2.5; step: 0.1; decimals: 1; value: root.st.anim_scale || 1; onCommitted: v => root.setVal("anim_scale", v) }
+                            }
+                            Section { text: "EFEITOS" }
+                            Opt {
+                                label: "Borda girando"; hint: "O degradê da borda gira (usa mais GPU)"
+                                Toggle { on: !!root.st.border_spin; onToggled: v => root.setVal("border_spin", v) }
+                            }
+                        }
+                    }
+
+                    // 3 — Atalhos
+                    Flickable {
+                        anchors.fill: parent
+                        visible: opacity > 0
+                        opacity: root.page === 3 ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 220 } }
+                        contentHeight: p3.height
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        Column {
+                            id: p3
+                            width: parent.width
+                            spacing: 2
+                            Section { text: "ATALHOS" }
+                            T {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                color: "#7a7a7a"
+                                font.bold: false
+                                font.pixelSize: 11
+                                text: "Escolha os modificadores e clique na tecla para trocá-la. Esc cancela. Vermelho = combinação repetida."
+                            }
+                            Repeater {
+                                model: root.bindDefs
+                                delegate: Opt {
+                                    id: br
+                                    required property var modelData
+                                    label: modelData.label
+                                    readonly property bool dup: root.dupCount(modelData.id) > 1
+                                    Row {
+                                        spacing: 6
+                                        Layout.alignment: Qt.AlignVCenter
+                                        Repeater {
+                                            model: root.modOrder
+                                            delegate: Rectangle {
+                                                id: mchip
+                                                required property string modelData
+                                                readonly property bool on: root.modsOf(br.modelData.id).indexOf(modelData) >= 0
+                                                width: mt.implicitWidth + 18
+                                                height: 28
+                                                radius: 14
+                                                color: on ? root.accA(0.35) : (mma.containsMouse ? "#1affffff" : "transparent")
+                                                border.width: 1
+                                                border.color: on ? root.accA(0.8) : "#33ffffff"
+                                                Behavior on color { ColorAnimation { duration: 160 } }
+                                                T { id: mt; anchors.centerIn: parent; text: mchip.modelData; font.pixelSize: 10; color: mchip.on ? "#ffffff" : "#999999" }
+                                                MouseArea {
+                                                    id: mma
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: root.toggleMod(br.modelData.id, mchip.modelData)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        readonly property bool cap: root.capName === br.modelData.id
+                                        Layout.alignment: Qt.AlignVCenter
+                                        implicitWidth: Math.max(96, kt.implicitWidth + 28)
+                                        implicitHeight: 30
+                                        radius: 12
+                                        color: cap ? root.accent : (kma.containsMouse ? "#26ffffff" : "#14ffffff")
+                                        border.width: 1
+                                        border.color: br.dup ? "#ff5a5a" : (cap ? "transparent" : "#33ffffff")
+                                        Behavior on color { ColorAnimation { duration: 160 } }
+                                        T {
+                                            id: kt
+                                            anchors.centerIn: parent
+                                            text: parent.cap ? "pressione..." : root.keyOf(br.modelData.id)
+                                            color: parent.cap ? root.accentFg : (br.dup ? "#ff8a8a" : "#ffffff")
+                                            font.pixelSize: 12
+                                        }
+                                        MouseArea {
+                                            id: kma
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: root.capName = br.modelData.id
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 4 — Sistema
+                    Flickable {
+                        anchors.fill: parent
+                        visible: opacity > 0
+                        opacity: root.page === 4 ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 220 } }
+                        contentHeight: p4.height
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        Column {
+                            id: p4
+                            width: parent.width
+                            spacing: 6
+                            Section { text: "SISTEMA" }
+                            Opt {
+                                label: "Restaurar padrões"; hint: "Volta aparência, janelas, animações e atalhos ao original"
+                                Rectangle {
+                                    implicitWidth: rt.implicitWidth + 32
+                                    implicitHeight: 34
+                                    radius: 14
+                                    color: rma.containsMouse ? "#ff5a5a" : "#33ff5a5a"
+                                    Behavior on color { ColorAnimation { duration: 160 } }
+                                    T { id: rt; anchors.centerIn: parent; text: "Restaurar"; color: "#ffffff" }
+                                    MouseArea { id: rma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.resetAll() }
+                                }
+                            }
+                            T {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                color: "#7a7a7a"
+                                font.bold: false
+                                font.pixelSize: 11
+                                text: "As escolhas ficam em ~/.config/hypr/settings.json. O Hyprland é recarregado a cada mudança.\nO formato dos painéis (ilha, launcher, power) depende de rodar uma vez o shellstyle.py."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

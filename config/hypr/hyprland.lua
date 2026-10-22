@@ -1,0 +1,319 @@
+--[[
+  HYPRLAND — config organizada por variáveis
+  Mexa só na seção "AJUSTES" (abaixo). O resto usa esses valores.
+  Cores de borda vêm do wallpaper (wallcolors.py → wallpaper-colors.lua).
+]]
+
+---------------------------------------------------------------
+-- AJUSTES (edite aqui)
+---------------------------------------------------------------
+local cfg = {
+    -- programas
+    terminal    = "kitty",
+    fileManager = "thunar",
+    toggle      = "~/.config/hypr/toggle-qs.sh",   -- abre/fecha um shell do quickshell
+    mainMod     = "SUPER",
+
+    -- monitor (use `hyprctl monitors` para ver o nome; "" = qualquer)
+    monitor = { output = "", mode = "1600x900@75", position = "auto", scale = "1" },
+
+    -- layout
+    gaps_in   = 5,
+    gaps_out  = { top = 45, right = 10, bottom = 10, left = 10 },  -- top = espaço da ilha
+    border    = 2,
+    rounding  = 12,
+
+    -- cores
+    border_inactive = "rgba(59595988)",
+    fallback_colors = { primary = "rgba(33ccffee)", secondary = "rgba(00ff99ee)" },
+    border_angle    = 45,
+
+    -- vidro (blur)
+    blur        = true,
+    shell_blur  = true,      -- blur nos painéis (ilha, launcher, power...)
+    blur_size   = 6,
+    blur_passes = 2,
+    blur_vibrancy = 0.17,
+    shadow = false,
+
+    -- opacidade das janelas
+    opacity_active   = 1.0,
+    opacity_inactive = 1.0,
+
+    -- animações: 1.0 = normal, 1.5 = mais lento, 0.7 = mais rápido
+    anim_scale = 1.0,
+    border_spin = false,      -- borda girando (gasta GPU)
+
+    -- teclado
+    kb = { layout = "br", variant = "abnt2" },
+
+    -- atalhos (o app de configurações edita estes)
+    binds = {
+        terminal    = "SUPER + Q",
+        filemanager = "SUPER + E",
+        launcher    = "SUPER + R",
+        launcher2   = "SUPER + SPACE",
+        wallpaper   = "SUPER + W",
+        power       = "SUPER + M",
+        lock        = "SUPER + L",
+        settings    = "SUPER + comma",
+        close       = "SUPER + C",
+        float       = "SUPER + V",
+    },
+}
+
+-- Valores salvos pelo app de configurações (SUPER + ,) sobrescrevem os de cima
+do
+    local okS, saved = pcall(dofile, os.getenv("HOME") .. "/.config/hypr/settings.lua")
+    if okS and type(saved) == "table" then
+        for k, v in pairs(saved) do cfg[k] = v end
+    end
+end
+
+-- shells do quickshell que se animam sozinhos (sem animação do Hyprland por cima)
+local qs_namespaces = { "island", "launcher", "power", "p3", "hyprquickpaper" }
+
+-- apps iniciados com a sessão
+local autostart = {
+    "systemctl --user start hyprpolkitagent",
+    "awww-daemon",
+    "if [ -f ~/.cache/hyprquickpaper/current_wallpaper ]; then awww img $(cat ~/.cache/hyprquickpaper/current_wallpaper); fi",
+    "qs -c island -d",
+    "qs -c p3 -d",
+}
+
+---------------------------------------------------------------
+-- UTILITÁRIOS
+---------------------------------------------------------------
+-- roda sem derrubar o resto da config se algo falhar
+local function try(fn, ...)
+    local ok, err = pcall(fn, ...)
+    if not ok then print("[hyprland.lua] " .. tostring(err)) end
+end
+
+local function exec(cmd) return hl.dsp.exec_cmd(cmd) end
+local M = cfg.mainMod
+
+---------------------------------------------------------------
+-- MONITOR / AMBIENTE / AUTOSTART
+---------------------------------------------------------------
+try(hl.monitor, {
+    output   = cfg.monitor.output,
+    mode     = cfg.monitor.mode,
+    position = cfg.monitor.position,
+    scale    = cfg.monitor.scale,
+})
+
+hl.env("XCURSOR_SIZE", "24")
+hl.env("HYPRCURSOR_SIZE", "24")
+
+hl.on("hyprland.start", function()
+    for _, c in ipairs(autostart) do hl.exec_cmd(c) end
+end)
+
+---------------------------------------------------------------
+-- CORES DO WALLPAPER
+---------------------------------------------------------------
+local colors = cfg.fallback_colors
+local ok, loaded = pcall(dofile, os.getenv("HOME") .. "/.config/hypr/wallpaper-colors.lua")
+if ok and type(loaded) == "table" then colors = loaded end
+
+---------------------------------------------------------------
+-- APARÊNCIA
+---------------------------------------------------------------
+hl.config({
+    general = {
+        gaps_in     = cfg.gaps_in,
+        gaps_out    = cfg.gaps_out,
+        border_size = cfg.border,
+        col = {
+            active_border   = { colors = { colors.primary, colors.secondary }, angle = cfg.border_angle },
+            inactive_border = cfg.border_inactive,
+        },
+        resize_on_border = false,
+        allow_tearing    = false,
+        layout           = "dwindle",
+    },
+
+    decoration = {
+        rounding         = cfg.rounding,
+        rounding_power   = 2,
+        active_opacity   = cfg.opacity_active,
+        inactive_opacity = cfg.opacity_inactive,
+        shadow = {
+            enabled      = cfg.shadow,
+            range        = 12,
+            render_power = 3,
+            color        = 0xee0a0a0a,
+        },
+        blur = {
+            enabled  = cfg.blur,
+            size     = cfg.blur_size,
+            passes   = cfg.blur_passes,
+            vibrancy = cfg.blur_vibrancy,
+            noise    = 0.01,
+        },
+    },
+
+    animations = { enabled = true },
+
+    dwindle = { preserve_split = true },
+    master  = { new_status = "master" },
+    scrolling = { fullscreen_on_one_column = true },
+
+    misc = {
+        force_default_wallpaper = -1,
+        disable_hyprland_logo   = true,
+    },
+
+    input = {
+        kb_layout  = cfg.kb.layout,
+        kb_variant = cfg.kb.variant,
+        kb_model   = "",
+        kb_options = "",
+        kb_rules   = "",
+        accel_profile = "flat",
+        follow_mouse  = 1,
+        sensitivity   = 0,
+        touchpad = { natural_scroll = false },
+    },
+})
+
+try(hl.gesture, { fingers = 3, direction = "horizontal", action = "workspace" })
+
+---------------------------------------------------------------
+-- ANIMAÇÕES (mesma "alma" da ilha: saída suave, sem tranco)
+-- speed = 1/10 de segundo (5 = 500ms), multiplicado por anim_scale
+---------------------------------------------------------------
+local S = cfg.anim_scale
+
+hl.curve("easeOutQuint",   { type = "bezier", points = { {0.23, 1},    {0.32, 1}    } })
+hl.curve("easeOutCubic",   { type = "bezier", points = { {0.33, 1},    {0.68, 1}    } })
+hl.curve("easeInCubic",    { type = "bezier", points = { {0.32, 0},    {0.67, 0}    } })
+hl.curve("easeInOutCubic", { type = "bezier", points = { {0.65, 0.05}, {0.36, 1}    } })
+hl.curve("linear",         { type = "bezier", points = { {0, 0},       {1, 1}       } })
+hl.curve("quick",          { type = "bezier", points = { {0.15, 0},    {0.1, 1}     } })
+
+local function anim(leaf, speed, bezier, style)
+    hl.animation({ leaf = leaf, enabled = true, speed = speed * S, bezier = bezier, style = style })
+end
+
+anim("global",        10,   "default")
+anim("windows",       4.5,  "easeOutQuint")
+anim("windowsIn",     5,    "easeOutQuint", "popin 90%")
+anim("windowsOut",    3.5,  "easeInOutCubic", "popin 90%")
+anim("fade",          4,    "easeOutCubic")
+anim("fadeIn",        4,    "easeOutCubic")
+anim("fadeOut",       3,    "easeOutCubic")
+anim("border",        8,    "easeOutQuint")
+anim("layers",        4,    "easeOutQuint")
+anim("layersIn",      4.5,  "easeOutQuint", "fade")
+anim("layersOut",     3,    "easeInOutCubic", "fade")
+anim("fadeLayersIn",  4,    "easeOutCubic")
+anim("fadeLayersOut", 3,    "easeOutCubic")
+anim("workspaces",    6,    "easeOutQuint", "slidefade 15%")
+anim("workspacesIn",  6,    "easeOutQuint", "slidefade 15%")
+anim("workspacesOut", 5,    "easeOutQuint", "slidefade 15%")
+anim("specialWorkspace", 5, "easeOutQuint", "slidefadevert 20%")
+anim("zoomFactor",    7,    "quick")
+
+if cfg.border_spin then
+    hl.animation({ leaf = "borderangle", enabled = true, speed = 60, bezier = "linear", style = "loop" })
+end
+
+---------------------------------------------------------------
+-- REGRAS DE LAYER (blur nos shells; animação própria no quickshell)
+---------------------------------------------------------------
+for _, ns in ipairs(qs_namespaces) do
+    try(hl.layer_rule, { match = { namespace = ns }, blur = cfg.shell_blur, ignore_alpha = 0.1, no_anim = true })
+end
+-- notificações (mako) deslizam da direita
+try(hl.layer_rule, { match = { namespace = "notifications" }, blur = cfg.shell_blur, ignore_alpha = 0.1, animation = "slide right" })
+
+---------------------------------------------------------------
+-- ATALHOS
+---------------------------------------------------------------
+-- apps
+local B = cfg.binds
+hl.bind(B.terminal,    exec(cfg.terminal))
+hl.bind(B.filemanager, exec(cfg.fileManager))
+hl.bind(B.launcher,    exec(cfg.toggle .. " launcher"))
+hl.bind(B.launcher2,   exec(cfg.toggle .. " launcher"))
+hl.bind(B.wallpaper,   exec("quickshell -p ~/.config/quickshell/hyprquickpaper"))
+hl.bind(B.settings,    exec(cfg.toggle .. " settings"))
+
+-- sessão
+hl.bind(B.power, exec(cfg.toggle .. " power"))
+hl.bind(B.lock,  exec("pidof hyprlock || hyprlock"))
+
+-- janelas
+hl.bind(B.close, hl.dsp.window.close())
+hl.bind(B.float, hl.dsp.window.float({ action = "toggle" }))
+hl.bind(M .. " + P", hl.dsp.window.pseudo())
+hl.bind(M .. " + J", hl.dsp.layout("togglesplit"))
+
+-- foco
+hl.bind(M .. " + left",  hl.dsp.focus({ direction = "left" }))
+hl.bind(M .. " + right", hl.dsp.focus({ direction = "right" }))
+hl.bind(M .. " + up",    hl.dsp.focus({ direction = "up" }))
+hl.bind(M .. " + down",  hl.dsp.focus({ direction = "down" }))
+
+-- áreas de trabalho 1..10 (tecla 0 = 10)
+for i = 1, 10 do
+    local key = i % 10
+    hl.bind(M .. " + " .. key,         hl.dsp.focus({ workspace = i }))
+    hl.bind(M .. " + SHIFT + " .. key, hl.dsp.window.move({ workspace = i }))
+end
+
+-- scratchpad
+hl.bind(M .. " + S",         hl.dsp.workspace.toggle_special("magic"))
+hl.bind(M .. " + SHIFT + S", hl.dsp.window.move({ workspace = "special:magic" }))
+
+-- scroll entre áreas
+hl.bind(M .. " + mouse_down", hl.dsp.focus({ workspace = "e+1" }))
+hl.bind(M .. " + mouse_up",   hl.dsp.focus({ workspace = "e-1" }))
+
+-- mover/redimensionar com o mouse
+hl.bind(M .. " + mouse:272", hl.dsp.window.drag(),   { mouse = true })
+hl.bind(M .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
+
+-- volume / brilho / mídia
+local lr = { locked = true, repeating = true }
+hl.bind("XF86AudioRaiseVolume",  exec("wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+"), lr)
+hl.bind("XF86AudioLowerVolume",  exec("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"),      lr)
+hl.bind("XF86AudioMute",         exec("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"),     lr)
+hl.bind("XF86AudioMicMute",      exec("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"),   lr)
+hl.bind("XF86MonBrightnessUp",   exec("brightnessctl -e4 -n2 set 5%+"),                  lr)
+hl.bind("XF86MonBrightnessDown", exec("brightnessctl -e4 -n2 set 5%-"),                  lr)
+hl.bind("XF86AudioNext",  exec("playerctl next"),       { locked = true })
+hl.bind("XF86AudioPause", exec("playerctl play-pause"), { locked = true })
+hl.bind("XF86AudioPlay",  exec("playerctl play-pause"), { locked = true })
+hl.bind("XF86AudioPrev",  exec("playerctl previous"),   { locked = true })
+
+-- prints
+hl.bind("Print",         exec("hyprshot -m output --clipboard-only"))
+hl.bind("SHIFT + Print", exec("hyprshot -m region --clipboard-only"))
+hl.bind("CTRL + Print",  exec("hyprshot -m window --clipboard-only"))
+hl.bind("SUPER + Print", exec("hyprshot -m region -o ~/Pictures/Screenshots"))
+
+---------------------------------------------------------------
+-- REGRAS DE JANELA
+---------------------------------------------------------------
+hl.window_rule({
+    name  = "suppress-maximize-events",
+    match = { class = ".*" },
+    suppress_event = "maximize",
+})
+
+hl.window_rule({
+    name  = "fix-xwayland-drags",
+    match = { class = "^$", title = "^$", xwayland = true, float = true, fullscreen = false, pin = false },
+    no_focus = true,
+})
+
+hl.window_rule({
+    name  = "move-hyprland-run",
+    match = { class = "hyprland-run" },
+    move  = "20 monitor_h-120",
+    float = true,
+})

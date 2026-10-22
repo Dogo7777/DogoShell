@@ -1,0 +1,10 @@
+width=250
+height=80
+border-radius=50
+border-size=0
+padding=12
+margin=8
+background-color=#000000cc
+text-color=#ffffff
+font=monospace 10
+anchor=top-right
